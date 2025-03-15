@@ -1,6 +1,7 @@
 ﻿using AsyncAwaitBestPractices;
 using DLSS_Swapper.Data;
 using DLSS_Swapper.Extensions;
+using DLSS_Swapper.Helpers;
 using DLSS_Swapper.Pages;
 using DLSS_Swapper.UserControls;
 using Microsoft.UI;
@@ -350,7 +351,7 @@ DLSS Swapper will close now.",
         {
             // Only auto check for updates once every 12 hours.
             var timeSinceLastUpdate = DateTimeOffset.Now - Settings.Instance.LastRecordsRefresh;
-            if (timeSinceLastUpdate.TotalHours > 12)
+            if (timeSinceLastUpdate.TotalMinutes > 5)
             {
                 var didUpdate = await UpdateManifestAsync();
                 if (didUpdate)
@@ -378,7 +379,7 @@ DLSS Swapper will close now.",
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
                 return false;
             }
         }
@@ -404,24 +405,21 @@ DLSS Swapper will close now.",
         }
 
         /// <summary>
-        /// Attempts to load manifest.json from dlss-swapper-manifest-builder.
+        /// Attempts to load manifest.json from dlss-swapper-manifest-builder repository.
         /// </summary>
         /// <returns>True if the dlss recrods manifest was downloaded and saved successfully</returns>
         internal async Task<bool> UpdateManifestAsync()
         {
-            var url = "https://dlss-swapper-downloads.beeradmoore.com/manifest.json";
-
             try
             {
                 using (var memoryStream = new MemoryStream())
                 {
                     // TODO: Check how quickly this takes to timeout if there is no internet connection. Consider 
                     // adding a "fast UpdateManifest" which will quit early if we were unable to load in 10sec 
-                    // which would then fall back to loading local.                    
-                    using (var stream = await App.CurrentApp.HttpClient.GetStreamAsync(url))
-                    {
-                        await stream.CopyToAsync(memoryStream);
-                    }
+                    // which would then fall back to loading local.
+                    var fileDownloader = new FileDownloader("https://raw.githubusercontent.com/beeradmoore/dlss-swapper-manifest-builder/refs/heads/main/manifest.json", 0);
+                    await fileDownloader.DownloadFileToStreamAsync(memoryStream);
+
                     memoryStream.Position = 0;
 
                     var manifest = await JsonSerializer.DeserializeAsync(memoryStream, SourceGenerationContext.Default.Manifest);
@@ -442,13 +440,14 @@ DLSS Swapper will close now.",
                     }
                     catch (Exception err)
                     {
-                        Logger.Error(err.Message);
+                        Logger.Error(err);
                     }
                 }
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
+                Debugger.Break();
             }
 
             return false;

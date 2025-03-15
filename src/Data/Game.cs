@@ -38,6 +38,11 @@ namespace DLSS_Swapper.Data
         [Column("title")]
         public partial string Title { get; set; } = string.Empty;
 
+        // Used to cache the title as a base64 string
+        string? _titleBase64 = null;
+        [Ignore]
+        public string TitleBase64 => _titleBase64 ??= Convert.ToBase64String(Encoding.UTF8.GetBytes(Title));
+
         [Column("install_path")]
         public string InstallPath { get; set; } = string.Empty;
 
@@ -116,7 +121,15 @@ namespace DLSS_Swapper.Data
 
         [ObservableProperty]
         [Ignore]
+        public partial bool MultipleDLSSFound { get; set; } = false;
+
+        [ObservableProperty]
+        [Ignore]
         public partial GameAsset? CurrentDLSS_G { get; set; } = null;
+
+        [ObservableProperty]
+        [Ignore]
+        public partial bool MultipleDLSSGFound { get; set; } = false;
 
         [ObservableProperty]
         [Ignore]
@@ -124,7 +137,15 @@ namespace DLSS_Swapper.Data
 
         [ObservableProperty]
         [Ignore]
+        public partial bool MultipleDLSSDFound { get; set; } = false;
+
+        [ObservableProperty]
+        [Ignore]
         public partial GameAsset? CurrentFSR_31_DX12 { get; set; } = null;
+
+        [ObservableProperty]
+        [Ignore]
+        public partial bool MultipleFSR31DX12Found { get; set; } = false;
 
         [ObservableProperty]
         [Ignore]
@@ -132,7 +153,15 @@ namespace DLSS_Swapper.Data
 
         [ObservableProperty]
         [Ignore]
+        public partial bool MultipleFSR31VKFound { get; set; } = false;
+
+        [ObservableProperty]
+        [Ignore]
         public partial GameAsset? CurrentXeSS { get; set; } = null;
+
+        [ObservableProperty]
+        [Ignore]
+        public partial bool MultipleXeSSFound { get; set; } = false;
 
         [ObservableProperty]
         [Ignore]
@@ -140,7 +169,15 @@ namespace DLSS_Swapper.Data
 
         [ObservableProperty]
         [Ignore]
+        public partial bool MultipleXeLLFound { get; set; } = false;
+
+        [ObservableProperty]
+        [Ignore]
         public partial GameAsset? CurrentXeSS_FG { get; set; } = null;
+
+        [ObservableProperty]
+        [Ignore]
+        public partial bool MultipleXeSSFGFound { get; set; } = false;
 
         protected void SetID()
         {
@@ -206,7 +243,49 @@ namespace DLSS_Swapper.Data
 
                 try
                 {
-                    var coverImageTask = UpdateCacheImageAsync();
+                    var shouldUpdatedCover = true;
+                    // This shouldn't crash, bit if it does lets not take down the entire processing.
+                    try
+                    {
+                        FileInfo? fileInfo = null;
+                        if (File.Exists(ExpectedCustomCoverImage))
+                        {
+                            fileInfo = new FileInfo(ExpectedCustomCoverImage);
+                        }
+                        else if (File.Exists(ExpectedCoverImage))
+                        {
+                            fileInfo = new FileInfo(ExpectedCoverImage);
+                        }
+
+                        if (fileInfo is not null)
+                        {
+                            var daysSinceLastModified = (DateTime.Now - fileInfo.LastWriteTime).TotalDays;
+
+                            // Add +/- 2 days so not all will process at the same time.
+                            daysSinceLastModified += ((new Random()).NextDouble() - 0.5) * 4.0;
+
+                            // If its less than 7 days lets not try refresh.
+                            if (daysSinceLastModified < 7)
+                            {
+                                shouldUpdatedCover = false;
+                            }
+                        }
+                    }
+                    catch (Exception err)
+                    {
+                        Logger.Error(err);
+                        Debugger.Break();
+                    }
+
+                    Task? coverImageTask = null;
+                    if (shouldUpdatedCover)
+                    {
+                        coverImageTask = UpdateCacheImageAsync();
+                    }
+                    else
+                    {
+                        Logger.Verbose($"Skipping updating cover for {Title}");
+                    }
 
                     var enumerationOptions = new EnumerationOptions();
                     enumerationOptions.RecurseSubdirectories = true;
@@ -246,7 +325,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -264,7 +343,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -282,7 +361,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -300,7 +379,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -318,7 +397,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -336,7 +415,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -354,7 +433,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -372,7 +451,7 @@ namespace DLSS_Swapper.Data
                             gameAsset.LoadVersionAndHash();
                             GameAssets.Add(gameAsset);
 
-                            if (gameAsset.IsInKnownRecords() == false)
+                            if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                             {
                                 unknownGameAssets.Add(gameAsset);
                             }
@@ -411,12 +490,14 @@ namespace DLSS_Swapper.Data
                         }
                     }
 
-                    await coverImageTask;
-
+                    if (coverImageTask is not null)
+                    {
+                        await coverImageTask;
+                    }
                 }
                 catch (Exception err)
                 {
-                    Logger.Error(err.Message);
+                    Logger.Error(err);
                     Debugger.Break();
                 }
                 finally
@@ -502,57 +583,58 @@ namespace DLSS_Swapper.Data
                 Logger.Info("No backup records found.");
                 return (false, "Unable to reset to default. Please repair your game manually.", false);
             }
-            else if (existingBackupRecords.Count == 1)
+            else
             {
-                var existingBackupRecord = existingBackupRecords[0];
-
-                var primaryRecordName = existingBackupRecord.Path.Replace(".dlsss", string.Empty);
-                var existingRecords = this.GameAssets.Where(x => x.AssetType == gameAssetType && x.Path.Equals(primaryRecordName)).ToList();
-
-                if (existingRecords.Count != 1)
+                foreach (var existingBackupRecord in existingBackupRecords)
                 {
-                    Logger.Info("Backup record was found, existing records were not.");
-                    return (false, "Unable to reset to default. Please repair your game manually.", false);
-                }
+                    var primaryRecordName = existingBackupRecord.Path.Replace(".dlsss", string.Empty);
+                    var existingRecords = this.GameAssets.Where(x => x.AssetType == gameAssetType && x.Path.Equals(primaryRecordName)).ToList();
 
-                var existingRecord = existingRecords[0];
-
-                try
-                {
-                    File.Move(existingBackupRecord.Path, existingRecord.Path, true);
-                }
-                catch (UnauthorizedAccessException err)
-                {
-                    Logger.Error($"UnauthorizedAccessException: {err.Message}");
-                    if (App.CurrentApp.IsAdminUser() is false)
+                    if (existingRecords.Count != 1)
                     {
-                        return (false, "Unable to reset to default. Running DLSS Swapper as administrator may fix this.", true);
-                    }
-                    else
-                    {
+                        Logger.Info("Backup record was found, existing records were not.");
                         return (false, "Unable to reset to default. Please repair your game manually.", false);
                     }
+
+                    var existingRecord = existingRecords[0];
+
+                    try
+                    {
+                        File.Move(existingBackupRecord.Path, existingRecord.Path, true);
+                    }
+                    catch (UnauthorizedAccessException err)
+                    {
+                        Logger.Error(err);
+                        if (App.CurrentApp.IsAdminUser() is false)
+                        {
+                            return (false, "Unable to reset to default. Running DLSS Swapper as administrator may fix this.", true);
+                        }
+                        else
+                        {
+                            return (false, "Unable to reset to default. Please repair your game manually.", false);
+                        }
+                    }
+                    catch (Exception err)
+                    {
+                        Logger.Error(err);
+                        return (false, "Unable to reset to default. Please repair your game manually.", false);
+                    }
+
+                    var newGameAsset = new GameAsset()
+                    {
+                        Id = ID,
+                        AssetType = gameAssetType,
+                        Path = existingRecord.Path,
+                        Version = existingBackupRecord.Version,
+                        Hash = existingBackupRecord.Hash,
+                    };
+
+                    UpdateCurrentAsset(newGameAsset, gameAssetType);
+
+                    GameAssets.Remove(existingRecord);
+                    GameAssets.Remove(existingBackupRecord);
+                    GameAssets.Add(newGameAsset);
                 }
-                catch (Exception err)
-                {
-                    Logger.Error(err.Message);
-                    return (false, "Unable to reset to default. Please repair your game manually.", false);
-                }
-
-                var newGameAsset = new GameAsset()
-                {
-                    Id = ID,
-                    AssetType = gameAssetType,
-                    Path = existingRecord.Path,
-                    Version = existingBackupRecord.Version,
-                    Hash = existingBackupRecord.Hash,
-                };
-
-                UpdateCurrentAsset(newGameAsset, gameAssetType);
-
-                GameAssets.Remove(existingRecord);
-                GameAssets.Remove(existingBackupRecord);
-                GameAssets.Add(newGameAsset);
 
                 // Update game assets list by deleting and re-adding.
                 using (await Database.Instance.Mutex.LockAsync())
@@ -562,11 +644,6 @@ namespace DLSS_Swapper.Data
                 }
 
                 return (true, string.Empty, false);
-            }
-            else
-            {
-                Logger.Error("Expected 1 backup records. Founds more.");
-                return (false, "Unable to reset to default. Please repair your game manually.", false);
             }
         }
 
@@ -680,7 +757,7 @@ namespace DLSS_Swapper.Data
                         }
                         catch (UnauthorizedAccessException err)
                         {
-                            Logger.Error($"UnauthorizedAccessException: {err.Message}");
+                            Logger.Error(err);
                             if (App.CurrentApp.IsAdminUser() is false)
                             {
                                 return (false, "Unable to swap dll as we are unable to write to the target directory. Running DLSS Swapper as administrator may fix this.", true);
@@ -693,7 +770,7 @@ namespace DLSS_Swapper.Data
                         }
                         catch (Exception err)
                         {
-                            Logger.Error(err.Message);
+                            Logger.Error(err);
                             return (false, "Unable to swap dll. Please check your error log for more information.", false);
                         }
                     }
@@ -719,7 +796,7 @@ namespace DLSS_Swapper.Data
                 }
                 catch (UnauthorizedAccessException err)
                 {
-                    Logger.Error($"UnauthorizedAccessException: {err.Message}");
+                    Logger.Error(err);
                     if (App.CurrentApp.IsAdminUser() is false)
                     {
                         return (false, "Unable to swap dll as we are unable to write to the target directory. Running DLSS Swapper as administrator may fix this.", true);
@@ -729,9 +806,14 @@ namespace DLSS_Swapper.Data
                         return (false, "Unable to DLSS dll as we are unable to write to the target directory.", false);
                     }
                 }
+                catch (IOException err) when (err.HResult == -2147024864)
+                {
+                    Logger.Error(err);
+                    return (false, "Unable to swap dll. It appears to be in use by another program. Is your game currently running?", false);
+                }
                 catch (Exception err)
                 {
-                    Logger.Error(err.Message);
+                    Logger.Error(err);
                     return (false, "Unable to swap dll. Please check your error log for more information.", false);
                 }
             }
@@ -764,7 +846,7 @@ namespace DLSS_Swapper.Data
             catch (Exception err)
             {
                 // NOOP
-                Logger.Error(err.Message);
+                Logger.Error(err);
             }
 
             return (true, string.Empty, false);
@@ -844,14 +926,14 @@ namespace DLSS_Swapper.Data
         */
 
 
-        protected async Task ResizeCoverAsync(string imageSource)
+        protected async Task ResizeCoverAsync(Stream imageStream)
         {
             // TODO: 
             // - find optimal format (eg, is displaying 100 webp images more intense than 100 png images)
             // - load image based on scale
             try
             {
-                using (var image = await SixLabors.ImageSharp.Image.LoadAsync(imageSource).ConfigureAwait(false))
+                using (var image = await SixLabors.ImageSharp.Image.LoadAsync(imageStream).ConfigureAwait(false))
                 {
                     // If images are really big we resize to at least 2x the 200x300 we display as.
                     // In future this should be updated to resize to display scale.
@@ -876,7 +958,7 @@ namespace DLSS_Swapper.Data
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
             }
         }
 
@@ -920,7 +1002,7 @@ namespace DLSS_Swapper.Data
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
             }
         }
 
@@ -952,28 +1034,19 @@ namespace DLSS_Swapper.Data
 
             try
             {
-                using (var fileStream = new FileStream(tempFile, FileMode.Create))
+                using (var memoryStream = new MemoryStream())
                 {
-                    var httpResponseMessage = await App.CurrentApp.HttpClient.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-                    if (httpResponseMessage.IsSuccessStatusCode == false)
-                    {
-                        return;
-                    }
+                    var fileDownloader = new FileDownloader(url, 0);
+                    await fileDownloader.DownloadFileToStreamAsync(memoryStream).ConfigureAwait(false);
+                    memoryStream.Position = 0;
 
-                    // This could be optimised by loading stream directly to ImageSharp and skip
-                    // the save/load to disk.
-                    using (var stream = httpResponseMessage.Content.ReadAsStream())
-                    {
-                        await stream.CopyToAsync(fileStream).ConfigureAwait(false);
-                    }
+                    // Now if the image is downloaded lets resize it, 
+                    await ResizeCoverAsync(memoryStream).ConfigureAwait(false);
                 }
-
-                // Now if the image is downloaded lets resize it, 
-                await ResizeCoverAsync(tempFile).ConfigureAwait(false);
             }
             catch (Exception err)
             {
-                Logger.Error($"{err.Message}, url: {url}");
+                Logger.Error(err, $"For url: {url}");
                 Debugger.Break();
             }
             finally
@@ -1006,7 +1079,7 @@ namespace DLSS_Swapper.Data
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
                 Debugger.Break();
             }
         }
@@ -1044,7 +1117,7 @@ namespace DLSS_Swapper.Data
                             }
                             catch (Exception err)
                             {
-                                Logger.Error($"Could not delete {cachedGameAsset.Path}, {err.Message}");
+                                Logger.Error(err, $"Could not delete {cachedGameAsset.Path}");
                             }
                         }
                     }
@@ -1065,7 +1138,7 @@ namespace DLSS_Swapper.Data
                     }
                     catch (Exception err)
                     {
-                        Logger.Error($"Could not delete {thumbnailImage}, {err.Message}");
+                        Logger.Error(err, $"Could not delete {thumbnailImage}");
                     }
                 }
 
@@ -1080,7 +1153,7 @@ namespace DLSS_Swapper.Data
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
             }
         }
 
@@ -1141,7 +1214,7 @@ namespace DLSS_Swapper.Data
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
             }
         }
 
@@ -1267,6 +1340,15 @@ namespace DLSS_Swapper.Data
             CurrentXeLL = null;
             CurrentXeSS_FG = null;
 
+            MultipleDLSSFound = GameAssets.Count(x => x.AssetType == GameAssetType.DLSS) > 1;
+            MultipleDLSSGFound = GameAssets.Count(x => x.AssetType == GameAssetType.DLSS_G) > 1;
+            MultipleDLSSDFound = GameAssets.Count(x => x.AssetType == GameAssetType.DLSS_D) > 1;
+            MultipleFSR31DX12Found = GameAssets.Count(x => x.AssetType == GameAssetType.FSR_31_DX12) > 1;
+            MultipleFSR31VKFound = GameAssets.Count(x => x.AssetType == GameAssetType.FSR_31_VK) > 1;
+            MultipleXeSSFound = GameAssets.Count(x => x.AssetType == GameAssetType.XeSS) > 1;
+            MultipleXeLLFound = GameAssets.Count(x => x.AssetType == GameAssetType.XeLL) > 1;
+            MultipleXeSSFGFound = GameAssets.Count(x => x.AssetType == GameAssetType.XeSS_FG) > 1;
+
             foreach (var gameAsset in GameAssets)
             {
                 if (gameAsset.AssetType == GameAssetType.DLSS)
@@ -1339,7 +1421,7 @@ namespace DLSS_Swapper.Data
                     var unknownGameAssets = new List<GameAsset>();
                     foreach (var gameAsset in GameAssets)
                     {
-                        if (gameAsset.IsInKnownRecords() == false)
+                        if (DLLManager.Instance.IsInKnownGameAsset(gameAsset, this) == false)
                         {
                             unknownGameAssets.Add(gameAsset);
                         }

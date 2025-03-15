@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics.Contracts;
+using System.IO;
 using System.Threading.Tasks;
 using DLSS_Swapper.Interfaces;
 using SQLite;
@@ -25,12 +26,16 @@ public class ManuallyAddedGame : Game
 
     public async Task ImportCoverImage(string imagePath)
     {
-        await ResizeCoverAsync(imagePath).ConfigureAwait(false);
+        using (var fileStream = File.Open(imagePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await ResizeCoverAsync(fileStream).ConfigureAwait(false);
+        }
     }
 
-    protected override async Task UpdateCacheImageAsync()
+    protected override Task UpdateCacheImageAsync()
     {
         // NOOP, the image is manually managed by the user.
+        return Task.CompletedTask;
     }
 
     public override bool UpdateFromGame(Game game)

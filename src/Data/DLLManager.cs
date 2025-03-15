@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace DLSS_Swapper.Data;
@@ -21,6 +22,10 @@ internal class DLLManager
     public ObservableCollection<DLLRecord> XeLLRecords { get; } = new ObservableCollection<DLLRecord>();
     public ObservableCollection<DLLRecord> XeSSFGRecords { get; } = new ObservableCollection<DLLRecord>();
 
+    public KnownDLLs KnownDLLs { get; private set; } = new KnownDLLs();
+
+    readonly ReaderWriterLockSlim _knownDLLsReadWriterLock = new ReaderWriterLockSlim();
+
     internal void LoadFromManifest()
     {
 
@@ -30,6 +35,17 @@ internal class DLLManager
     // Previously: UpdateDLSSRecordsList
     internal void UpdateDLLRecordLists(Manifest manifest)
     {
+        _knownDLLsReadWriterLock.EnterWriteLock();
+        try
+        {
+            KnownDLLs = manifest.KnownDLLs;
+        }
+        finally
+        {
+            _knownDLLsReadWriterLock.ExitWriteLock();
+        }
+
+
         // TODO: Only change changed items
 
         manifest.DLSS.Sort();
@@ -137,45 +153,34 @@ internal class DLLManager
 
     internal string GetExpectedZipPath(DLLRecord dllRecord, bool isImportedRecord = false)
     {
-        var recordType = dllRecord.AssetType switch
-        {
-            GameAssetType.DLSS => "dlss",
-            GameAssetType.DLSS_G => "dlss_g",
-            GameAssetType.DLSS_D => "dlss_d",
-            GameAssetType.FSR_31_DX12 => "fsr_31_dx12",
-            GameAssetType.FSR_31_VK => "fsr_31_vk",
-            GameAssetType.XeSS => "xess",
-            GameAssetType.XeLL => "xell",
-            GameAssetType.XeSS_FG => "xess_fg",
-            _ => string.Empty,
-        };
+        var recordType = dllRecord.GetRecordSimpleType();
 
         if (recordType == string.Empty)
         {
             return string.Empty;
         }
 
-#if PORTABLE
-        var zipPath = Path.Combine("StoredData", (isImportedRecord ? $"imported_{recordType}_zip" : $"{recordType}_zip"));
-#else
         var zipPath = Path.Combine(Storage.GetStorageFolder(), (isImportedRecord ? $"imported_{recordType}_zip" : $"{recordType}_zip"));
-#endif
-        return zipPath;
-    }
 
-    internal string GetExpectedPath(DLLRecord dllRecord, bool isImportedRecord = false)
-    {
-        var zipPath = GetExpectedZipPath(dllRecord, isImportedRecord);
-        if (string.IsNullOrEmpty(zipPath))
-        {
-            return string.Empty;
-        }
-        return Path.Combine(zipPath, $"{dllRecord.Version}_{dllRecord.MD5Hash}.zip");
+        return zipPath;
     }
 
     internal void LoadLocalRecordFromDLSSRecord(DLLRecord dllRecord, bool isImportedRecord = false)
     {
-        var expectedPath = GetExpectedPath(dllRecord, isImportedRecord);
+        var zipPath = GetExpectedZipPath(dllRecord, isImportedRecord);
+        if (string.IsNullOrEmpty(zipPath))
+        {
+            return;
+        }
+
+        var expectedPath = Path.Combine(zipPath, $"{dllRecord.GetRecordSimpleType()}_v{dllRecord.Version}_{dllRecord.MD5Hash}.zip");
+
+        // Expected path was moved in v1.1.7. This is to migrate the zips from old to new path.
+        var legacyExpectedPath = Path.Combine(zipPath, $"{dllRecord.Version}_{dllRecord.MD5Hash}.zip");
+        if (File.Exists(legacyExpectedPath) == true && File.Exists(expectedPath) == false)
+        {
+            File.Move(legacyExpectedPath, expectedPath);
+        }
 
         // Load record.
         var localRecord = LocalRecord.FromExpectedPath(expectedPath, isImportedRecord);
@@ -228,5 +233,278 @@ internal class DLLManager
             GameAssetType.XeSS_FG => GameAssetType.XeSS_FG_BACKUP,
             _ => throw new Exception($"Unknown AssetType: {assetType}"),
         };
+    }
+
+    /// <summary>
+    /// Checks to see if the current GameAsset DLL is known to already existing DLL record known GameAsset for a game in a particular library
+    /// </summary>
+    /// <param name="gameAsset"></param>
+    /// <param name="game"></param>
+    /// <returns></returns>
+    ///
+    public bool IsInKnownGameAsset(GameAsset gameAsset, Game game)
+    {
+        // For each asset type first check if is in the DLSS Swapper manifest
+        if (gameAsset.AssetType == GameAssetType.DLSS || gameAsset.AssetType == GameAssetType.DLSS_BACKUP)
+        {
+            if (DLSSRecords.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.DLSS.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false; 
+        }
+        else if (gameAsset.AssetType == GameAssetType.DLSS_D || gameAsset.AssetType == GameAssetType.DLSS_D_BACKUP)
+        {
+            if (DLSSDRecords.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.DLSS_D.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        else if (gameAsset.AssetType == GameAssetType.DLSS_G || gameAsset.AssetType == GameAssetType.DLSS_G_BACKUP)
+        {
+            if (DLSSGRecords.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.DLSS_G.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        else if (gameAsset.AssetType == GameAssetType.FSR_31_DX12 || gameAsset.AssetType == GameAssetType.FSR_31_DX12_BACKUP)
+        {
+            if (FSR31DX12Records.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.FSR_31_DX12.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        else if (gameAsset.AssetType == GameAssetType.FSR_31_VK || gameAsset.AssetType == GameAssetType.FSR_31_VK_BACKUP)
+        {
+            if (FSR31VKRecords.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.FSR_31_VK.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        else if (gameAsset.AssetType == GameAssetType.XeSS || gameAsset.AssetType == GameAssetType.XeSS_BACKUP)
+        {
+            if (XeSSRecords.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.XeSS.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        else if (gameAsset.AssetType == GameAssetType.XeLL || gameAsset.AssetType == GameAssetType.XeLL_BACKUP)
+        {
+            if (XeLLRecords.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.XeLL.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        else if (gameAsset.AssetType == GameAssetType.XeSS_FG || gameAsset.AssetType == GameAssetType.XeSS_FG_BACKUP)
+        {
+            if (XeSSFGRecords.Any(x => gameAsset.Hash.Equals(x.MD5Hash, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+            HashedKnownDLL? hashedKnownDLL = null;
+            _knownDLLsReadWriterLock.EnterReadLock();
+            try
+            {
+                hashedKnownDLL = KnownDLLs.XeSS_FG.FirstOrDefault(x => gameAsset.Hash.Equals(x.Hash, StringComparison.InvariantCultureIgnoreCase));
+            }
+            finally
+            {
+                _knownDLLsReadWriterLock.ExitReadLock();
+            }
+
+            if (hashedKnownDLL is null)
+            {
+                return false;
+            }
+
+            if (hashedKnownDLL.Sources.TryGetValue(game.GameLibrary.ToString(), out var gameHashes) == true)
+            {
+                if (gameHashes.Contains(game.TitleBase64) == true)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        
+        return false;
     }
 }

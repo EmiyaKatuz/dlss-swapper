@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
@@ -26,30 +27,11 @@ public partial class LibraryPageModel : CommunityToolkit.Mvvm.ComponentModel.Obs
 {
     LibraryPage libraryPage;
 
-    public CollectionViewSource LibraryCollectionViewSource { get; init; }
-
-    List<DLLRecordGroup> dllRecordGroups;
+    internal ObservableCollection<DLLRecord>? SelectedLibraryList { get; private set; } = null;
 
     public LibraryPageModel(LibraryPage libraryPage)
     {
         this.libraryPage = libraryPage;
-
-        dllRecordGroups = new List<DLLRecordGroup>();
-        dllRecordGroups.Add(new DLLRecordGroup("DLSS", DLLManager.Instance.DLSSRecords ));
-        dllRecordGroups.Add(new DLLRecordGroup("DLSS Frame Generation", DLLManager.Instance.DLSSGRecords ));
-        dllRecordGroups.Add(new DLLRecordGroup("DLSS Ray Reconstruction", DLLManager.Instance.DLSSDRecords ));
-        dllRecordGroups.Add(new DLLRecordGroup("FSR 3.1 (DirectX 12)", DLLManager.Instance.FSR31DX12Records ));
-        dllRecordGroups.Add(new DLLRecordGroup("FSR 3.1 (Vulkan)", DLLManager.Instance.FSR31VKRecords));
-        dllRecordGroups.Add(new DLLRecordGroup("XeSS", DLLManager.Instance.XeSSRecords));
-        dllRecordGroups.Add(new DLLRecordGroup("XeLL", DLLManager.Instance.XeLLRecords));
-        dllRecordGroups.Add(new DLLRecordGroup("XeSS Frame Generation", DLLManager.Instance.XeSSFGRecords));
-
-        LibraryCollectionViewSource = new CollectionViewSource()
-        {
-            IsSourceGrouped = true,
-            Source = dllRecordGroups,
-            ItemsPath = new PropertyPath("AdvancedDLLRecordsCollectionView"),
-        };
     }
 
     [RelayCommand]
@@ -154,11 +136,12 @@ public partial class LibraryPageModel : CommunityToolkit.Mvvm.ComponentModel.Obs
                            continue;
                        }
 
+                       // TODO: When fixing imported system, make sure to update this to use full path
                         var internalZipDir = DLLManager.Instance.GetAssetTypeName(dllRecord.AssetType);
-                       if (dllRecord.LocalRecord.IsImported == true)
-                       {
-                           internalZipDir = Path.Combine("Imported", internalZipDir);
-                       }
+                        if (dllRecord.LocalRecord.IsImported == true)
+                        {
+                            internalZipDir = Path.Combine("Imported", internalZipDir);
+                        }
 
                         internalZipDir = Path.Combine(internalZipDir, dllRecord.DisplayName);
 
@@ -223,13 +206,13 @@ public partial class LibraryPageModel : CommunityToolkit.Mvvm.ComponentModel.Obs
                }
                catch (Exception err2)
                {
-                   Logger.Error(err2.Message);
+                   Logger.Error(err2);
                }
            }
 
            exportingDialog.Hide();
 
-           Logger.Error(err.Message);
+           Logger.Error(err);
 
            // If the fullExpectedPath does not exist, or there was an error writing it.
            var dialog = new EasyContentDialog(libraryPage.XamlRoot)
@@ -253,7 +236,7 @@ public partial class LibraryPageModel : CommunityToolkit.Mvvm.ComponentModel.Obs
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
             }
         }
     }
@@ -393,6 +376,16 @@ Only import dlls from sources you trust.",
             Settings.Instance.HasShownWarning = true;
         }
 
+        var sorryDialog = new EasyContentDialog(libraryPage.XamlRoot)
+        {
+            Title = "Sorry",
+            CloseButtonText = "Okay",
+            DefaultButton = ContentDialogButton.Close,
+            Content = @"Import system is currently broken, but it is on the roadmap to be fixed.",
+        };
+        await sorryDialog.ShowAsync();
+        
+        /*
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.CurrentApp.MainWindow);
         var openPicker = new Windows.Storage.Pickers.FileOpenPicker();
         openPicker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary;
@@ -525,11 +518,11 @@ Only import dlls from sources you trust.",
                     }
                     catch (Exception err2)
                     {
-                        Logger.Error(err2.Message);
+                        Logger.Error(err2);
                     }
                 }
 
-                Logger.Error(err.Message);
+                Logger.Error(err);
 
 
                 // TODO: Button to open error log
@@ -543,6 +536,7 @@ Only import dlls from sources you trust.",
                 await dialog.ShowAsync();
             }
         }
+        */
     }
 
     [RelayCommand]
@@ -673,7 +667,7 @@ Only import dlls from sources you trust.",
         catch (Exception err)
         {
             exportingDialog.Hide();
-            Logger.Error(err.Message);
+            Logger.Error(err);
 
             // If the fullExpectedPath does not exist, or there was an error writing it.
             var dialog = new EasyContentDialog(libraryPage.XamlRoot)
@@ -697,5 +691,25 @@ Only import dlls from sources you trust.",
             Content = record.LocalRecord?.DownloadErrorMessage ?? "Could not download at this time.",
         };
         await dialog.ShowAsync();
+    }
+
+    internal void SelectLibrary(GameAssetType gameAssetType)
+    {
+        
+        var newList = gameAssetType switch
+        {
+            GameAssetType.DLSS => DLLManager.Instance.DLSSRecords,
+            GameAssetType.DLSS_G => DLLManager.Instance.DLSSGRecords,
+            GameAssetType.DLSS_D => DLLManager.Instance.DLSSDRecords,
+            GameAssetType.FSR_31_DX12 => DLLManager.Instance.FSR31DX12Records,
+            GameAssetType.FSR_31_VK => DLLManager.Instance.FSR31VKRecords,
+            GameAssetType.XeSS => DLLManager.Instance.XeSSRecords,
+            GameAssetType.XeLL => DLLManager.Instance.XeLLRecords,
+            GameAssetType.XeSS_FG => DLLManager.Instance.XeSSFGRecords,
+            _ => null,
+        };
+        SelectedLibraryList = null;
+        SelectedLibraryList = newList;
+        OnPropertyChanged(nameof(SelectedLibraryList));
     }
 }

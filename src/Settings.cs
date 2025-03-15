@@ -1,4 +1,5 @@
 ﻿using DLSS_Swapper.Data;
+using DLSS_Swapper.Pages;
 using Microsoft.UI.Xaml;
 using System;
 using System.Collections;
@@ -175,7 +176,11 @@ namespace DLSS_Swapper
 
 
         // Don't forget to change this back to off.
+#if DEBUG
+        LoggingLevel _loggingLevel = LoggingLevel.Verbose;
+#else
         LoggingLevel _loggingLevel = LoggingLevel.Error;
+#endif
         public LoggingLevel LoggingLevel
         {
             get { return _loggingLevel; }
@@ -279,9 +284,57 @@ namespace DLSS_Swapper
             }
         }
 
+        GameGridViewType _gameGridViewType = GameGridViewType.GridView;
+        public GameGridViewType GameGridViewType
+        {
+            get { return _gameGridViewType; }
+            set
+            {
+                if (_gameGridViewType != value)
+                {
+                    _gameGridViewType = value;
+                    if (_autoSave)
+                    {
+                        SaveJson();
+                    }
+                }
+            }
+        }
+        
 
+        int _gridViewItemWidth = 200;
+        public int GridViewItemWidth
+        {
+            get { return _gridViewItemWidth; }
+            set
+            {
+                if (_gridViewItemWidth != value)
+                {
+                    _gridViewItemWidth = value;
+                    if (_autoSave)
+                    {
+                        SaveJson();
+                    }
+                }
+            }
+        }
 
-
+        bool _onlyShowDownloadedDlls = false;
+        public bool OnlyShowDownloadedDlls
+        {
+            get { return _onlyShowDownloadedDlls; }
+            set
+            {
+                if (_onlyShowDownloadedDlls != value)
+                {
+                    _onlyShowDownloadedDlls = value;
+                    if (_autoSave)
+                    {
+                        SaveJson();
+                    }
+                }
+            }
+        }
 
         /*
         public List<string> Directories { get; set; } = new List<string>();
@@ -311,9 +364,6 @@ namespace DLSS_Swapper
             }
         }
         */
-
-
-
 
         void SaveJson()
         {

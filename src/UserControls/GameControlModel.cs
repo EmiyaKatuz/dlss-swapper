@@ -117,7 +117,7 @@ public partial class GameControlModel : ObservableObject
         }
         catch (Exception err)
         {
-            Logger.Error(err.Message);
+            Logger.Error(err);
 
             if (gameControlWeakReference.TryGetTarget(out GameControl? gameControl))
             {
@@ -254,7 +254,7 @@ public partial class GameControlModel : ObservableObject
                 DefaultButton = ContentDialogButton.Primary,
             };
 
-            var dllPickerControl = new DLLPickerControl(dialog, Game, gameAssetType);
+            var dllPickerControl = new DLLPickerControl(gameControlWeakReference, dialog, Game, gameAssetType);
             dialog.Content = dllPickerControl;
             await dialog.ShowAsync();
         }
@@ -278,6 +278,23 @@ public partial class GameControlModel : ObservableObject
             await Game.SaveToDatabaseAsync();
             OnPropertyChanged(nameof(DlssPresetHasChanged));
             IsDlssPresetSaved = true;
+        }
+    }
+    
+    [RelayCommand]
+    async Task MultipleDLLsFoundAsync(GameAssetType gameAssetType)
+    {
+        if (gameControlWeakReference.TryGetTarget(out GameControl? gameControl))
+        {
+            var dialog = new EasyContentDialog(gameControl.XamlRoot)
+            {
+                Title = $"Multiple {DLLManager.Instance.GetAssetTypeName(gameAssetType)} DLLs Found",
+                PrimaryButtonText = "Okay",
+                DefaultButton = ContentDialogButton.Primary,
+                Content = new MultipleDLLsFoundControl(Game, gameAssetType),
+            };
+
+            await dialog.ShowAsync();
         }
     }
 }

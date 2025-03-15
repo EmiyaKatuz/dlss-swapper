@@ -50,8 +50,33 @@ namespace DLSS_Swapper
         //internal Manifest Manifest { get; } = new Manifest();
         internal Manifest ImportedManifest { get; } = new Manifest();
 
-        internal HttpClient _httpClient = new HttpClient();
-        public HttpClient HttpClient => _httpClient;
+        internal HttpClient? _httpClient;
+        public HttpClient HttpClient
+        {
+            get
+            {
+                if (_httpClient is null)
+                {
+                    var version = GetVersion();
+                    var versionString = $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}";
+
+                    var httpClientHandler = new HttpClientHandler()
+                    {
+                        AutomaticDecompression = System.Net.DecompressionMethods.All,
+                        UseCookies = true,
+                        CookieContainer = new System.Net.CookieContainer(),
+                        AllowAutoRedirect = true,
+                    };
+                    _httpClient = new HttpClient(httpClientHandler);
+                    _httpClient.DefaultRequestHeaders.Add("User-Agent", $"dlss-swapper/{versionString}");
+                    _httpClient.Timeout = TimeSpan.FromMinutes(30);
+                    _httpClient.DefaultRequestVersion = new Version(2, 0);
+                    _httpClient.DefaultRequestHeaders.ConnectionClose = true;
+                }
+
+                return _httpClient;
+            }
+        }
 
 
         /// <summary>
@@ -64,17 +89,7 @@ namespace DLSS_Swapper
 
             UnhandledException += App_UnhandledException;
 
-            var version = GetVersion();
-            var versionString = string.Format("{0}.{1}.{2}.{3}", version.Major, version.Minor, version.Build, version.Revision);
-
-
-            Logger.Info($"App launch - v{versionString}", null);
-
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", $"dlss-swapper v{versionString}");
-
             GlobalElementTheme = Settings.Instance.AppTheme;
-
-            Database.Instance.Init();
 
             this.InitializeComponent();
         }
@@ -90,12 +105,43 @@ namespace DLSS_Swapper
         /// will be used such as when the application is launched to open a specific file.
         /// </summary>
         /// <param name="args">Details about the launch request and process.</param>
-        protected override void OnLaunched(LaunchActivatedEventArgs args)
+        protected override async void OnLaunched(LaunchActivatedEventArgs args)
         {
+                        
+            // If this is the first instance launched, then register it as the "main" instance.
+            // If this isn't the first instance launched, then "main" will already be registered,
+            // so retrieve it.
+            var mainInstance = Microsoft.Windows.AppLifecycle.AppInstance.FindOrRegisterForKey("main");
+
+            // If the instance that's executing the OnLaunched handler right now
+            // isn't the "main" instance.
+            if (mainInstance.IsCurrent == false)
+            {
+                // Redirect the activation (and args) to the "main" instance, and exit.
+                var activatedEventArgs = Microsoft.Windows.AppLifecycle.AppInstance.GetCurrent().GetActivatedEventArgs();
+                await mainInstance.RedirectActivationToAsync(activatedEventArgs);
+                Process.GetCurrentProcess().Kill();
+                return;
+            }
+
+            if (Storage.StoragePath.Trim(Path.DirectorySeparatorChar).Contains(Environment.SystemDirectory, StringComparison.InvariantCultureIgnoreCase))
+            {
+                var failToLaunchWindow = new FailToLaunchWindow();
+                failToLaunchWindow.Activate();
+                return;
+            }
+
+            var version = GetVersion();
+            var versionString = $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}";
+            Logger.Info($"App launch - v{versionString}", null);
+            Logger.Info($"StoragePath: {Storage.StoragePath}");
+
+            Database.Instance.Init();
+
             MainWindow.Activate();
 
-            // No need to calculate this for portable app.
 #if !PORTABLE
+            // No need to calculate this for portable app.
             var calculateInstallSizeThread = new Thread(CalculateInstallSize);
             calculateInstallSizeThread.Start();
 #endif
@@ -126,7 +172,7 @@ namespace DLSS_Swapper
             }
             catch (Exception err)
             {
-                Logger.Error(err.Message);
+                Logger.Error(err);
             }
         }
 
@@ -146,52 +192,6 @@ namespace DLSS_Swapper
             return directorySize;
         }
 #endif
-
-        /*
-        // Disabled because the non-async method seems faster.
-        internal async Task LoadLocalRecordFromDLSSRecordAsync(DLSSRecord dlssRecord)
-        {
-            var expectedPath = Path.Combine("dlls", $"{dlssRecord.Version}_{dlssRecord.MD5Hash}", "nvngx_dlss.dll");
-            Logger.Debug($"ExpectedPath: {expectedPath}");
-            // Load record.
-            var localRecord = await LocalRecord.FromExpectedPathAsync(expectedPath);
-
-            // If the record exists we will update existing properties, if not we add it as new property.
-            var existingLocalRecord = LocalRecords.FirstOrDefault(x => x.Equals(localRecord));
-            if (existingLocalRecord is null)
-            {
-                dlssRecord.LocalRecord = localRecord;
-                LocalRecords.Add(localRecord);
-            }
-            else
-            {
-                existingLocalRecord.UpdateFromNewLocalRecord(localRecord);
-
-                // Probably don't need to set this again.
-                dlssRecord.LocalRecord = existingLocalRecord;
-            }
-        }
-        */
-
-
-        /*
-        // Disabled because the non-async method seems faster. 
-        internal async Task LoadLocalRecordsAsync()
-        {
-            var tasks = new List<Task>();
-
-            // We attempt to load all local records, even if experemental is not enabled.
-            foreach (var dlssRecord in DLSSRecords.Stable)
-            {
-                tasks.Add(LoadLocalRecordFromDLSSRecordAsync(dlssRecord));
-            }
-            foreach (var dlssRecord in DLSSRecords.Experimental)
-            {
-                tasks.Add(LoadLocalRecordFromDLSSRecordAsync(dlssRecord));
-            }
-            await Task.WhenAll(tasks);
-        }
-        */
 
         public bool IsAdminUser()
         {
@@ -284,7 +284,15 @@ namespace DLSS_Swapper
 
                 if (didEnqueue == false)
                 {
-                    Logger.Error("TryEnqueue failed.");
+                    try
+                    {
+                        // I am sure there is a better way to fill out a stacktrace than throwing an exception
+                        throw new Exception("TryEnqueue failed.");
+                    }
+                    catch (Exception err)
+                    {
+                        Logger.Error(err);
+                    }
                 }
 
                 return didEnqueue;
